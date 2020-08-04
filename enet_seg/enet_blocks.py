@@ -1,32 +1,138 @@
 import tensorflow as tf
 import numpy as np
 
-class InitialBlock(tf.keras.Model):
+class InitialBlock(tf.keras.layers.Layer):
 
-    def __init__(self, num_filters : int, kernel_sizes : tuple, stride : tuple, padding):
+    def __init__(self, num_filters : int = 13, conv_kernel : tuple = (2, 2), conv_stride : tuple = (2, 2), padding : str = 'VALID',
+        pool_kernel : tuple = (2, 2), pool_stride : tuple = (2, 2)):
 
-        super.__init__()
-
-        # Defining the convolution and maxpool layers
-        self.convolution = tf.keras.layers.Conv2D(filters = num_filters, kernel_size = kernel_sizes[0], stride = strides[0])
-        self.maxpool = tf.keras.layers.MaxPool2D(pool_size = kernel_sizes[1], strides = stride[0], padding = padding)
-
-    def call(self, image):
-        
         """
-        Overloading the call function for the Model Class
+        Initial block of the E-Net architecture.
 
         Parameters:
-            image : Input image for the ENet Block
+
+            num_filters : No. of filters to be used for convolution = 13
+            conv_kernel : Size of convolution filters
+            conv_stride : Strides in both directions for convolution
+            padding : Padding for maxpool operation (either 'SAME' or 'VALID')
+            pool_kernel : Size of maxpool kernel
+            pool_stride : Strides in both directions for maxpool operation
 
         Returns:
-            final_output : Final concatenated output with 16 channels
+
+            final_output : 16 channel output formed by concatenating output of both branches
         """
-        con_output = self.convolution(image)
-        max_output = self.maxpool(image)
+
+        super().__init__()
+        self.num_filters = num_filters
+        self.conv_kernel = conv_kernel
+        self.conv_stride = conv_stride
+        self.pool_kernel = pool_kernel
+        self.pool_stride = pool_stride
+        self.padding = padding
+
+    def build(self, input_shape):
+
+        # Convolution Layer, PRelu and BatchNorm
+        self.convolution = tf.keras.layers.Conv2D(filters = self.num_filters, kernel_size = self.conv_kernel, strides = self.conv_stride)
+        self.prelu = tf.keras.layers.PReLU()
+        self.batch_norm = tf.keras.layers.BatchNormalization()
+
+        # Maxpool Layer
+        self.maxpool = tf.keras.layers.MaxPool2D(pool_size = self.pool_kernel, strides = self.pool_stride, padding = self.padding)
+
+    def call(self, block_input):
+        
+        con_output = self.convolution(block_input)
+        batch_norm_output = self.batch_norm(con_output)
+        rel_output = self.prelu(con_output)
+        max_output = self.maxpool(block_input)
 
         final_output = tf.concat([con_output, max_output], axis = -1)
         return final_output
+
+class DownsampleBN(tf.keras.layers.Layer):
+
+    def __init__(self, out_channel : int, filter_size : int = 3, pool_size : tuple = (2, 2), pool_stride : tuple = (2, 2), pool_pad : str = 'VALID'):
+
+        """
+        Downsampling Bottleneck block of the E-Net architecture.
+
+        Parameters:
+
+            pool_size : Tuple for pooling filter size
+            pool_stride : Strides in both directions for pooling layer
+            pool_pad : Either 'SAME' or 'VALID' for pooling layer
+            in_channel : No of channels in input
+            out_channel : No of channels in output
+            filter_size : Filter size for the conv operation in BRANCH-2
+
+        Returns:
+
+            output : Result of the element-wise addition of the 2 branch outputs with PReLU activation
+
+        """
+
+        super().__init__()
+        self.filter_size = filter_size
+        self.out_channel = out_channel
+
+        # Maxpool layer
+        self.b1_maxpool = tf.keras.layers.MaxPool2D(pool_size = pool_size, strides = pool_stride, padding = pool_pad)
+
+        # Batch Normalization and PReLU layers
+        self.b2_batch_norm = tf.keras.layers.BatchNormalization()
+        self.b2_prelu = tf.keras.layers.PReLU()
+        
+        # 1x1 expansion layer after convolution
+        self.b2_expand = tf.keras.layers.Conv2D(filters = out_channel, kernel_size = (1, 1), strides = (1, 1))
+
+        # Regularizer : Spatial Dropout with p = 0.01 and adding
+        self.b2_reg = tf.keras.layers.SpatialDropout2D(rate = 0.01, data_format = 'channels_last')
+        self.add_output = tf.keras.layers.Add()
+
+    def build(self, input_shape):
+
+        # Calculating the number of channels to pad
+        in_channel = input_shape[3]
+        pad = abs(in_channel - self.out_channel)
+
+        # No. of filters for convolution
+        filters = self.out_channel // in_channel
+
+        # 2x2 convolution and conv of choice
+        self.b2_conv1 = tf.keras.layers.Conv2D(filters = filters, kernel_size = (2, 2), strides = (2, 2))
+        self.b2_conv2 = tf.keras.layers.Conv2D(filters = filters, kernel_size = (self.filter_size, self.filter_size), strides = (1, 1))
+
+        # Zero padding the input
+        self.b1_padding = tf.keras.layers.ZeroPadding2D(padding = (0, 0, pad), data_format = 'channels_last')
+
+    def call(self, block_input):
+        
+        ######## BRANCH - 1 ###############
+        maxpool_output = self.b1_maxpool(block_input)
+        branch_1 = self.b1_padding(maxpool_output)
+
+        ######## BRANCH - 2 ###############
+
+        # 1st convolution with BN and PReLU
+        conv1_out = self.b2_conv1(block_input)
+        batch1_out = self.b2_batch_norm(conv1_out)
+        prelu1_out = self.b2_prelu(batch1_out)
+
+        # 2nd convolution with BN and PReLU
+        conv2_out = self.b2_conv2(prelu1_out)
+        batch2_out = self.b2_batch_norm(conv2_out)
+        prelu2_out = self.b2_prelu(batch2_out)
+
+        # 1x1 expansion and spatial dropout
+        exp1_out = self.b2_expand(prelu2_out)
+        branch2_out = self.b2_reg(exp1_out)
+
+        # Combining outputs of the 2 branches
+        output = self.add_output([branch1_out, branch2_out])
+        output = self.b2_prelu(output)
+        return output
 
 
 class UpsampleBN(tf.keras.Model):
@@ -35,21 +141,6 @@ class UpsampleBN(tf.keras.Model):
 
         super().__init__()
 
-    def build(self):
-        raise NotImplementedError
-
-    def call():
-        raise NotImplementedError
-
-class DownsampleBN(tf.keras.Model):
-
-    def __init__(self):
-
-        super().__init__()
-
-    def build(self):
-        raise NotImplementedError
-
     def call():
         raise NotImplementedError
 
@@ -57,9 +148,6 @@ class AntisymmetricBN(tf.keras.Model):
     def __init__(self):
 
         super().__init__()
-
-    def build(self):
-        raise NotImplementedError
 
     def call():
         raise NotImplementedError
@@ -70,9 +158,6 @@ class DilatedBN(tf.keras.Model):
 
         super().__init__()
 
-    def build(self):
-        raise NotImplementedError
-
     def call():
         raise NotImplementedError
 
@@ -81,9 +166,6 @@ class RegularBN(tf.keras.Model):
     def __init__(self):
 
         super().__init__()
-
-    def build(self):
-        raise NotImplementedError
 
     def call():
         raise NotImplementedError
