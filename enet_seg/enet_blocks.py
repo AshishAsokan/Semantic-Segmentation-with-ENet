@@ -53,7 +53,7 @@ class InitialBlock(tf.keras.layers.Layer):
 
 class DownsampleBN(tf.keras.layers.Layer):
 
-    def __init__(self, out_channel : int, filter_size : int = 3, pool_size : tuple = (2, 2), pool_stride : tuple = (2, 2), pool_pad : str = 'VALID'):
+    def __init__(self, out_channel : int, filter_size : int = 3, pool_size : tuple = (2, 2), pool_stride : tuple = (2, 2), bn_pad : str = 'SAME'):
 
         """
         Downsampling Bottleneck block of the E-Net architecture.
@@ -62,7 +62,7 @@ class DownsampleBN(tf.keras.layers.Layer):
 
             pool_size : Tuple for pooling filter size
             pool_stride : Strides in both directions for pooling layer
-            pool_pad : Either 'SAME' or 'VALID' for pooling layer
+            bn_pad : Either 'SAME' or 'VALID' for pooling layer and conv in BRANCH-2
             in_channel : No of channels in input
             out_channel : No of channels in output
             filter_size : Filter size for the conv operation in BRANCH-2
@@ -76,42 +76,42 @@ class DownsampleBN(tf.keras.layers.Layer):
         super().__init__()
         self.filter_size = filter_size
         self.out_channel = out_channel
+        self.bn_pad = bn_pad
 
-        # Maxpool layer
-        self.b1_maxpool = tf.keras.layers.MaxPool2D(pool_size = pool_size, strides = pool_stride, padding = pool_pad)
-
-        # Batch Normalization and PReLU layers
-        self.b2_batch_norm = tf.keras.layers.BatchNormalization()
+        # Maxpool and PReLU layers
+        self.b1_maxpool = tf.keras.layers.MaxPool2D(pool_size = pool_size, strides = pool_stride, padding = bn_pad)
         self.b2_prelu = tf.keras.layers.PReLU()
         
         # 1x1 expansion layer after convolution
         self.b2_expand = tf.keras.layers.Conv2D(filters = out_channel, kernel_size = (1, 1), strides = (1, 1))
 
-        # Regularizer : Spatial Dropout with p = 0.01 and adding
+        # Regularizer : Spatial Dropout with p = 0.01
         self.b2_reg = tf.keras.layers.SpatialDropout2D(rate = 0.01, data_format = 'channels_last')
-        self.add_output = tf.keras.layers.Add()
+
+        # Batch normalization
+        self.b2_batch_norm = tf.keras.layers.BatchNormalization()
 
     def build(self, input_shape):
 
         # Calculating the number of channels to pad
         in_channel = input_shape[3]
         pad = abs(in_channel - self.out_channel)
+        self.pad_tensor = tf.convert_to_tensor([[0, 0], [0, 0], [0, 0], [0, pad]], dtype = tf.int32)
 
         # No. of filters for convolution
         filters = self.out_channel // in_channel
 
         # 2x2 convolution and conv of choice
         self.b2_conv1 = tf.keras.layers.Conv2D(filters = filters, kernel_size = (2, 2), strides = (2, 2))
-        self.b2_conv2 = tf.keras.layers.Conv2D(filters = filters, kernel_size = (self.filter_size, self.filter_size), strides = (1, 1))
-
-        # Zero padding the input
-        self.b1_padding = tf.keras.layers.ZeroPadding2D(padding = (0, 0, pad), data_format = 'channels_last')
+        self.b2_conv2 = tf.keras.layers.Conv2D(filters = filters, kernel_size = (self.filter_size, self.filter_size), strides = (1, 1), padding = self.bn_pad)
 
     def call(self, block_input):
         
         ######## BRANCH - 1 ###############
+
+        # Maxpool followed by padding the channels
         maxpool_output = self.b1_maxpool(block_input)
-        branch_1 = self.b1_padding(maxpool_output)
+        branch_1 = tf.pad(maxpool_output, paddings = self.pad_tensor)
 
         ######## BRANCH - 2 ###############
 
@@ -127,11 +127,11 @@ class DownsampleBN(tf.keras.layers.Layer):
 
         # 1x1 expansion and spatial dropout
         exp1_out = self.b2_expand(prelu2_out)
-        branch2_out = self.b2_reg(exp1_out)
+        branch_2 = self.b2_reg(exp1_out)
 
         # Combining outputs of the 2 branches
-        output = self.add_output([branch1_out, branch2_out])
-        output = self.b2_prelu(output)
+        output = tf.keras.layers.Add()([branch_1, branch_2])
+        output = tf.keras.layers.PReLU()(output)
         return output
 
 
