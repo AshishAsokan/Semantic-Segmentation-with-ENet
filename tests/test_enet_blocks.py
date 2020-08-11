@@ -1,5 +1,5 @@
 import tensorflow as tf
-from enet_seg.enet_blocks import InitialBlock, DownsampleBN, RegularBN, UpsampleBN
+from enet_seg.enet_blocks import *
 from enet_seg.utilities import MaxUnpool2D
 import pytest
 
@@ -79,6 +79,34 @@ def test_UpsampleBN():
     output = upsample_bn(down_out)
 
     assert output.shape == (5, 256, 256, 16)
+
+def test_AntisymmtericBN():
+
+    """ A simple test that checks the output of the Antisymmetric Bottleneck """
+
+    # Initializing random input
+    tf.random.set_seed(1)
+    test_input = tf.random.uniform(shape=[5, 128, 128, 64])
+
+    # Creating the layer and appling Regular BN
+    anti_bn = AntisymmetricBN()
+    output = anti_bn(test_input)
+
+    assert output.shape == (5, 128, 128, 64)
+
+def test_DilatedBN():
+
+    """ A simple test that checks the output of the Dilated Bottleneck """
+
+    # Initializing random input
+    tf.random.set_seed(1)
+    test_input = tf.random.uniform(shape=[5, 128, 128, 64])
+
+    # Creating the layer and appling Regular BN
+    dilated_bn = DilatedBN()
+    output = dilated_bn(test_input)
+
+    assert output.shape == (5, 128, 128, 64)
 
 if __name__ == '__main__':
     pytest.main([__file__])

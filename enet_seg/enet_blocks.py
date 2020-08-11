@@ -296,23 +296,161 @@ class UpsampleBN(tf.keras.layers.Layer):
         return output
 
 
+class AntisymmetricBN(tf.keras.layers.Layer):
 
-class AntisymmetricBN(tf.keras.Model):
-    def __init__(self):
+    def __init__(self, filter_size : int = 5,  bn_pad : str = 'SAME', p_dropout : float = 0.1, filters : int = 4):
+
+        """
+        Regular Bottleneck block of the E-Net architecture.
+
+        Parameters:
+
+            bn_pad : Either 'SAME' or 'VALID' for pooling layer and conv in BRANCH-2
+            out_channel : No of channels in output
+            filter_size : Filter size for the conv operation in BRANCH-2
+            p_dropout : Dropout rate of the regularizer
+
+        Returns:
+
+            output : Result of the element-wise addition of the 2 branch outputs with PReLU activation
+
+        """
 
         super().__init__()
+        self.filter_size = filter_size
+        self.bn_pad = bn_pad
+        self.filters = filters
 
-    def call():
-        raise NotImplementedError
+        # PReLU layer
+        self.b2_prelu = tf.keras.layers.PReLU()
 
-class DilatedBN(tf.keras.Model):
+        # Regularizer : Spatial Dropout with p = 0.01
+        self.b2_reg = tf.keras.layers.SpatialDropout2D(rate = p_dropout, data_format = 'channels_last')
 
-    def __init__(self):
+        # Batch normalization
+        self.b2_batch_norm = tf.keras.layers.BatchNormalization()
+
+    def build(self, input_shape):
+
+        # Number of output channels
+        channels_out = input_shape[3]
+
+        # 1x1 convolution
+        self.b2_conv1 = tf.keras.layers.Conv2D(filters = self.filters, kernel_size = (1, 1), strides = (1, 1))
+
+        # Asymmetric convolutions
+        self.b2_conv21 = tf.keras.layers.Conv2D(filters = self.filters, kernel_size = (self.filter_size, 1), strides = (1, 1), padding = self.bn_pad)
+        self.b2_conv22 = tf.keras.layers.Conv2D(filters = self.filters, kernel_size = (1, self.filter_size), strides = (1, 1), padding = self.bn_pad)
+
+        # 1x1 expansion layer after convolution
+        self.b2_expand = tf.keras.layers.Conv2D(filters = channels_out, kernel_size = (1, 1), strides = (1, 1))
+
+    def call(self, block_input):
+        
+        ######## BRANCH - 1 ###############
+
+        # Storing input as Branch-1
+        branch_1 = block_input
+
+        ######## BRANCH - 2 ###############
+
+        # 1x1 projection with BN and PReLU
+        conv1_out = self.b2_conv1(block_input)
+        batch1_out = self.b2_batch_norm(conv1_out)
+        prelu1_out = self.b2_prelu(batch1_out)
+
+        # 2nd asymmetricconvolution with BN and PReLU
+        conv21_out = self.b2_conv21(prelu1_out)
+        conv22_out = self.b2_conv21(conv21_out)
+        batch2_out = self.b2_batch_norm(conv22_out)
+        prelu2_out = self.b2_prelu(batch2_out)
+
+        # 1x1 expansion and spatial dropout
+        exp1_out = self.b2_expand(prelu2_out)
+        branch_2 = self.b2_reg(exp1_out)
+
+        # Combining outputs of the 2 branches
+        output = tf.keras.layers.Add()([branch_1, branch_2])
+        output = tf.keras.layers.PReLU()(output)
+        return output
+
+class DilatedBN(tf.keras.layers.Layer):
+
+    def __init__(self, filter_size : int = 3,  bn_pad : str = 'SAME', p_dropout : float = 0.1, filters : int = 4, dilation : int = 2):
+
+        """
+        Regular Bottleneck block of the E-Net architecture.
+
+        Parameters:
+
+            bn_pad : Either 'SAME' or 'VALID' for pooling layer and conv in BRANCH-2
+            out_channel : No of channels in output
+            filter_size : Filter size for the conv operation in BRANCH-2
+            p_dropout : Dropout rate of the regularizer
+
+        Returns:
+
+            output : Result of the element-wise addition of the 2 branch outputs with PReLU activation
+
+        """
 
         super().__init__()
+        self.filter_size = filter_size
+        self.dilation = dilation
+        self.bn_pad = bn_pad
+        self.filters = filters
 
-    def call():
-        raise NotImplementedError
+        # PReLU layer
+        self.b2_prelu = tf.keras.layers.PReLU()
+
+        # Regularizer : Spatial Dropout with p = 0.01
+        self.b2_reg = tf.keras.layers.SpatialDropout2D(rate = p_dropout, data_format = 'channels_last')
+
+        # Batch normalization
+        self.b2_batch_norm = tf.keras.layers.BatchNormalization()
+
+    def build(self, input_shape):
+
+        # Number of output channels
+        channels_out = input_shape[3]
+
+        # 1x1 convolution and conv of choice
+        dilation_tuple = (self.dilation, self.dilation)
+        self.b2_conv1 = tf.keras.layers.Conv2D(filters = self.filters, kernel_size = (1, 1), strides = (1, 1))
+        self.b2_conv2 = tf.keras.layers.Conv2D(filters = self.filters, kernel_size = (self.filter_size, self.filter_size), strides = (1, 1), dilation_rate = dilation_tuple, padding = self.bn_pad)
+
+        # 1x1 expansion layer after convolution
+        self.b2_expand = tf.keras.layers.Conv2D(filters = channels_out, kernel_size = (1, 1), strides = (1, 1))
+
+    def call(self, block_input):
+        
+        ######## BRANCH - 1 ###############
+
+        # Storing input as Branch-1
+        branch_1 = block_input
+
+        ######## BRANCH - 2 ###############
+
+        # 1x1 projection with BN and PReLU
+        conv1_out = self.b2_conv1(block_input)
+        batch1_out = self.b2_batch_norm(conv1_out)
+        prelu1_out = self.b2_prelu(batch1_out)
+
+        # 2nd convolution with BN and PReLU
+        conv2_out = self.b2_conv2(prelu1_out)
+        batch2_out = self.b2_batch_norm(conv2_out)
+        prelu2_out = self.b2_prelu(batch2_out)
+
+        # 1x1 expansion and spatial dropout
+        exp1_out = self.b2_expand(prelu2_out)
+        branch_2 = self.b2_reg(exp1_out)
+
+        print(branch_2.shape)
+
+        # Combining outputs of the 2 branches
+        output = tf.keras.layers.Add()([branch_1, branch_2])
+        output = tf.keras.layers.PReLU()(output)
+        return output
 
 
 
