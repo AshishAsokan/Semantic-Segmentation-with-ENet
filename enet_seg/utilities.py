@@ -45,6 +45,8 @@ class MaxUnpool2D(tf.keras.layers.Layer):
 
         # For the last channel (Number of feature maps)
         feature_mask = tf.range(self.shape_output[3], dtype=tf.int32)
+        print(feature_mask.shape)
+        print(ones_mask.shape)
         features = ones_mask * feature_mask
 
         # Indices for merging with scatter_nd

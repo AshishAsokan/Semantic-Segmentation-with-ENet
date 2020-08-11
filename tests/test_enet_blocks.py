@@ -1,5 +1,5 @@
 import tensorflow as tf
-from enet_seg.enet_blocks import InitialBlock, DownsampleBN, RegularBN
+from enet_seg.enet_blocks import InitialBlock, DownsampleBN, RegularBN, UpsampleBN
 from enet_seg.utilities import MaxUnpool2D
 import pytest
 
@@ -37,7 +37,7 @@ def test_MaxUnpool2D():
 
     # Initializing random input
     tf.random.set_seed(1)
-    test_input = tf.random.uniform(shape=[5, 30, 30, 30])
+    test_input = tf.random.uniform(shape=[5, 128, 128, 64])
 
     # Performing maxpool with argmax
     pool_output, pool_mask = tf.nn.max_pool_with_argmax(test_input, ksize = (2, 2), strides = (2, 2), padding = 'VALID')
@@ -46,7 +46,7 @@ def test_MaxUnpool2D():
     maxunpool = MaxUnpool2D(pool_mask = pool_mask)
     output = maxunpool(pool_output)
 
-    assert output.shape == (5, 30, 30, 30)
+    assert output.shape == (5, 128, 128, 64)
 
 def test_RegularBN():
 
@@ -61,6 +61,24 @@ def test_RegularBN():
     output = regular_bn(test_input)
 
     assert output.shape == (5, 128, 128, 64)
+
+def test_UpsampleBN():
+
+    """ A simple test that checks the output of the Unsample Bottleneck """
+
+    # Initializing random input
+    tf.random.set_seed(1)
+    test_input = tf.random.uniform(shape=[5, 256, 256, 16])
+
+    # Applying Maxpool
+    downsample = DownsampleBN(64, ret_argmax = True)
+    (down_out, pool_mask) = downsample(test_input)
+
+    # Creating the layer and appling Upsample BN
+    upsample_bn = UpsampleBN(pool_argmax = pool_mask, out_channel = 16)
+    output = upsample_bn(down_out)
+
+    assert output.shape == (5, 256, 256, 16)
 
 if __name__ == '__main__':
     pytest.main([__file__])
