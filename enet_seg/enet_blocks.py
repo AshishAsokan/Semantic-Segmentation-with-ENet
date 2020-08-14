@@ -211,8 +211,6 @@ class RegularBN(tf.keras.layers.Layer):
         exp1_out = self.b2_expand(prelu2_out)
         branch_2 = self.b2_reg(exp1_out)
 
-        print(branch_2.shape)
-
         # Combining outputs of the 2 branches
         output = tf.keras.layers.Add()([branch_1, branch_2])
         output = tf.keras.layers.PReLU()(output)
@@ -220,7 +218,7 @@ class RegularBN(tf.keras.layers.Layer):
 
 class UpsampleBN(tf.keras.layers.Layer):
 
-    def __init__(self, pool_argmax, out_channel : int, filter_size : int = 2, pool_size : tuple = (2, 2), bn_pad : str = 'SAME', p_dropout : float = 0.1):
+    def __init__(self, out_channel : int, filter_size : int = 2, pool_size : tuple = (2, 2), bn_pad : str = 'SAME', p_dropout : float = 0.1):
 
         """
         Upsampling Bottleneck block of the E-Net architecture.
@@ -251,27 +249,27 @@ class UpsampleBN(tf.keras.layers.Layer):
         self.b2_batchnorm = tf.keras.layers.BatchNormalization()
         self.b2_prelu = tf.keras.layers.PReLU()
 
-        # MaxUnpool layer
-        self.b1_maxunpool = MaxUnpool2D(pool_mask = pool_argmax)
-
     def build(self, input_shape):
 
         # Feature map reduction in BRANCH-2
         filters = input_shape[3] // 4
         self.b2_red = tf.keras.layers.Conv2D(filters = filters, kernel_size = (1, 1))
 
-        # Deconvolution layer for BRAHCN-2
+        # # MaxUnpool layer
+        # self.b1_maxunpool = MaxUnpool2D(pool_mask = pool_argmax)
+
+        # Deconvolution layer for BRANCH-2
         filter_tup = (self.filter_size, self.filter_size)
         self.b2_deconv = tf.keras.layers.Conv2DTranspose(filters = filters, kernel_size = filter_tup, strides = (2, 2))
 
 
-    def call(self, block_input):
+    def call(self, block_input, pool_argmax):
 
         ######## BRANCH - 1 ###############
 
         # Reducing channels and MaxUnpool
         pool_out = self.b1_red(block_input)
-        branch_1 = self.b1_maxunpool(pool_out)
+        branch_1 = MaxUnpool2D(pool_mask = pool_argmax)(pool_out)
 
         ######## BRANCH - 2 ###############
 
@@ -287,7 +285,7 @@ class UpsampleBN(tf.keras.layers.Layer):
 
         # 1x1 expansion
         conv3_out = self.b2_expand(prelu2_out)
-        batch_norm3 = self.b2_batchnorm(conv2_out)
+        batch_norm3 = self.b2_batchnorm(conv3_out)
         branch_2 = tf.keras.layers.PReLU()(batch_norm3)
 
         # Adding branch outputs
@@ -296,7 +294,7 @@ class UpsampleBN(tf.keras.layers.Layer):
         return output
 
 
-class AntisymmetricBN(tf.keras.layers.Layer):
+class AsymmetricBN(tf.keras.layers.Layer):
 
     def __init__(self, filter_size : int = 5,  bn_pad : str = 'SAME', p_dropout : float = 0.1, filters : int = 4):
 
@@ -444,8 +442,6 @@ class DilatedBN(tf.keras.layers.Layer):
         # 1x1 expansion and spatial dropout
         exp1_out = self.b2_expand(prelu2_out)
         branch_2 = self.b2_reg(exp1_out)
-
-        print(branch_2.shape)
 
         # Combining outputs of the 2 branches
         output = tf.keras.layers.Add()([branch_1, branch_2])
