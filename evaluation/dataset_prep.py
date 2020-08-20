@@ -1,13 +1,33 @@
 import tensorflow as tf
 import numpy as np
+import matplotlib.pyplot as plt
 import os
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # Defining dataset path
-camvid = 'Evaluation/CamVid'
+camvid = 'evaluation/CamVid'
 
-def process_data(images, labels):
+def decode_image(input_image, height, width):
+
+    """
+    Function to decode the One-Hot encoded image
+
+    Returns:
+        out: Semantically segmented output for the given encoded input
+    """
+
+    # Determining the classes of the pixels
+    pred_val = tf.argmax(input_image, -1)
+
+    # Casting to float32 for reshaping
+    out = tf.cast(pred_val, dtype=tf.float32)
+
+    # Reshaping to specified height and width
+    out = tf.reshape(out, shape=[height, width])
+    return out
+
+def process_data(images, labels, height, width, num_classes):
 
     """
     Function to decode the training images and labels for the dataset
@@ -17,7 +37,7 @@ def process_data(images, labels):
         labels : Tensor containing the train labels
 
     Returns:
-        Tuple containing the decoded training images and annotations
+        [Tuple] : containing the decoded training images and annotations
 
     """
 
@@ -31,14 +51,29 @@ def process_data(images, labels):
         label = tf.io.read_file(names[1])
 
         # Decoding image and label
-        image = tf.image.decode_image(image, channels = 3)
-        label = tf.image.decode_image(label, channels = 3)
+        image = tf.image.decode_png(image, channels = 3)
+        label = tf.image.decode_png(label)
+
+        # Resizing image and label
+        image = tf.image.resize(image, size = (height, width))
+        image = tf.cast(tf.convert_to_tensor(image, dtype = tf.float32), dtype = tf.int32)
+        label = tf.image.resize(label, size = (height, width))
+
+        # One-hot encoding the class labels
+        label = tf.cast(tf.convert_to_tensor(label, dtype = tf.float32), dtype = tf.int32)
+        label = tf.reshape(label, shape = [height, width])
+        label = tf.one_hot(label, num_classes, axis = -1)
+
+        # # Displaying labels
+        # image_out = decode_image(label, height, width)
+        # plt.imshow(image_out)
+        # plt.show()
 
         image_list.append(image)
         label_list.append(label)
 
     # Creating tensor for the datasets
-    train_x = tf.convert_to_tensor(tf.stack(image_list))
+    train_x = tf.convert_to_tensor(tf.stack(image_list), dtype = tf.float32)
     train_y = tf.convert_to_tensor(tf.stack(label_list))
     return (train_x, train_y)
 
@@ -61,10 +96,9 @@ def train_valid_data(set_type : str):
     # Converting images to tensors
     images_ten = tf.convert_to_tensor(train_images)
     labels_ten = tf.convert_to_tensor(train_labels)
-    # input_queue = tf.data.Dataset.from_tensor_slices((images_ten, labels_ten))
 
     # Creating the dataset
-    dataset = process_data(images_ten, labels_ten)
+    dataset = process_data(images_ten, labels_ten, 512, 512, 32)
     return dataset
 
 def ret_dataset():
@@ -78,11 +112,8 @@ def ret_dataset():
 
     train_set = train_valid_data('train')
     valid_set = train_valid_data('valid')
-
-    print(train_set[0].shape)
-    print(train_set[1].shape)
-    print(valid_set[0].shape)
-    print(valid_set[1].shape)
     return (train_set, valid_set)
 
-ret_dataset()
+if __name__ == '__main__':
+
+    ret_dataset()
