@@ -16,9 +16,9 @@ pip install -e Semantic-Segmentation-with-Enet/
 
 # Files in the Repository
 
-- ```tests``` : Contains a python script to test the dimensions of all the blocks using random data
+- ```tests/tests_enet.py``` : Python script to test the dimensions of all the blocks and model using random data
 
-- ```evaluation/dataset_prep.py``` :  A script to prepare the training data and to decode & encode the segmented images in the dataset
+- ```evaluation/dataset_prep.py``` :  Prepares the training data and decodes & encodes the segmented images in the dataset
 
 - ```enet_seg/enet_blocks.py``` : Definitions of the Bottleneck layers in the architecture
 
